@@ -265,7 +265,16 @@ def render_blocks(blocks, x, y, width):
             svg += f'<line x1="{x+width}" y1="{current_y}" x2="{x+yes_w}" y2="{current_y+header_h}" stroke="black" stroke-width="1"/>'
             
             # Label
-            svg += f'<text x="{x + width/2}" y="{current_y + header_h/2}" text-anchor="middle" font-size="{FONT_SIZE}">{html.escape(block["label"])}</text>'
+            # User requested logic:
+            # 1. Middle of block: x + width/2
+            # 2. Intersection point: x + yes_w
+            # 3. Position: Average of 1 and 2
+            
+            block_center_x = x + width / 2
+            intersection_x = x + yes_w
+            label_x = (block_center_x + intersection_x) / 2
+            
+            svg += f'<text x="{label_x}" y="{current_y + header_h/2}" text-anchor="middle" font-size="{FONT_SIZE}">{html.escape(block["label"])}</text>'
             
             # True/False
             svg += f'<text x="{x + yes_w/2}" y="{current_y + header_h - 5}" text-anchor="middle" font-size="12">True</text>'

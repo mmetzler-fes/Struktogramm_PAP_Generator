@@ -1,0 +1,31 @@
+graph TD
+    st([Start]) --> n1["Ausgabe: === Zahlerraten-Spiel startet ==="]
+    n1 --> n2["init values"]
+    n2 --> n3["Ausgabe: Anzeige auf LCD: Zahl 0-9 S1:- S2:+ S3:X, geratene_zahl"]
+    n3 --> n4{"enter==1?"}
+    
+    n4 -->|ja| n5["versuche = versuche + 1"]
+    n4 -->|nein| n3
+    
+    n5 --> n6{"geratene_zahl == zufallszahl?"}
+    
+    n6 -->|ja| n7["Ausgabe: RICHTIG GERATEN!"]
+    n6 -->|nein| n14{"zufallszahl > geratene_zahl?"}
+    
+    n7 --> n8["Ausgabe: Du hast in versuche Versuchen gewonnen!"]
+    n8 --> e([Ende])
+    
+    n14 -->|ja| n15["Ausgabe: Die gesuchte Zahl ist GRÖSSER ↑"]
+    n14 -->|nein| n16["Ausgabe: Die gesuchte Zahl ist KLEINER ↓"]
+    
+    n15 --> n10{"versuche >= max_versuche?"}
+    n16 --> n10
+    
+    n10 -->|ja| n11["Ausgabe: Leider verloren!"]
+    n10 -->|nein| n17["Ausgabe: Nächster Versuch..."]
+    
+    n11 --> n12["Ausgabe: Die Zahl war: zufallszahl"]
+    n12 --> n20["Ausgabe: === ENDE ==="]
+    
+    n17 --> n3
+    n20 --> e

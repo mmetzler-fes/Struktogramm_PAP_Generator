@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const mermaidSection = document.getElementById('mermaid-section');
     const mermaidPreview = document.getElementById('mermaid-preview');
     const downloadMermaidBtn = document.getElementById('download-mermaid-btn');
-    const convertNsdBtn = document.getElementById('convert-nsd-btn');
+    const convertNsdBtn = document.getElementById('convert-to-nsd-btn');
 
     const nsdSection = document.getElementById('nsd-section');
     const svgPreview = document.getElementById('svg-preview');

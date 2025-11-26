@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, send_file
 import os
 from converter import convert_mermaid_to_nsd
 from python_to_mermaid import convert_python_to_mermaid
+from arduino_to_mermaid import convert_arduino_to_mermaid
 
 app = Flask(__name__)
 
@@ -35,6 +36,20 @@ def convert_python():
     if file:
         python_content = file.read().decode('utf-8')
         mermaid_output = convert_python_to_mermaid(python_content)
+        return mermaid_output
+
+@app.route('/convert_arduino', methods=['POST'])
+def convert_arduino():
+    if 'file' not in request.files:
+        return 'No file uploaded', 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return 'No file selected', 400
+
+    if file:
+        arduino_content = file.read().decode('utf-8')
+        mermaid_output = convert_arduino_to_mermaid(arduino_content)
         return mermaid_output
 
 if __name__ == '__main__':

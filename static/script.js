@@ -115,6 +115,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     console.error('Error:', error);
                     alert('An error occurred during Python conversion.');
                 });
+        } else if (fileName.endsWith('.ino')) {
+            // Convert Arduino to Mermaid
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/convert_arduino', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.text())
+                .then(mermaidCode => {
+                    renderMermaid(mermaidCode);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred during Arduino conversion.');
+                });
         } else {
             // Assume Mermaid/Text file
             const reader = new FileReader();

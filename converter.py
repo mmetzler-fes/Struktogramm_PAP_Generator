@@ -10,6 +10,7 @@ LINE_HEIGHT = 20
 PADDING_X = 10
 PADDING_Y = 10
 MIN_BLOCK_WIDTH = 100
+LOOP_INDENT = 30  # Width of the side bar for loops
 
 def convert_mermaid_to_nsd(mermaid_content):
     graph, start_node = parse_mermaid(mermaid_content)
@@ -19,14 +20,12 @@ def convert_mermaid_to_nsd(mermaid_content):
     structured_tree = build_structure(graph, start_node, None, set())
     
     # 1. Calculate Minimum Widths
-    # We need to annotate the tree with min_width requirements
     total_min_width = calculate_min_widths(structured_tree)
     
-    # Ensure a reasonable total width, but at least the min required
+    # Ensure a reasonable total width
     width = max(800, total_min_width)
     
-    # 2. Calculate Heights based on the actual width we will use
-    # We pass the available width to calculate wrapping
+    # 2. Calculate Heights
     total_height = calculate_heights(structured_tree, width)
     
     svg_content = render_blocks(structured_tree, 0, 0, width)
@@ -36,7 +35,6 @@ def convert_mermaid_to_nsd(mermaid_content):
 def parse_mermaid(content):
     G = nx.DiGraph()
     lines = content.split('\n')
-    edge_pattern = re.compile(r'(.+?)\s*-->\s*(?:\|(.*?)\|\s*)?(.+)')
     
     for line in lines:
         line = line.strip()
@@ -81,24 +79,64 @@ def parse_mermaid(content):
     return G, start_node
 
 def parse_node_str(node_str):
-    m = re.match(r'(\w+)\s*(\[".*?"\]|\{".*?"\}|\(\[".*?"\]\)|\(\[.*?\]\))?', node_str)
+    # Match id followed by optional brackets containing label
+    # We use non-greedy match .*? inside brackets
+    m = re.match(r'(\w+)\s*(\[.*?\]|\{.*?\}|\(\[.*?\]\)|\(\(.*?\)|\))?', node_str)
     if not m: return None, None, None
     node_id = m.group(1)
     rest = m.group(2)
     label = node_id
     node_type = 'process'
+    
     if rest:
-        if rest.startswith('["'): label = rest[2:-2]; node_type = 'process'
-        elif rest.startswith('{"'): label = rest[2:-2]; node_type = 'decision'
-        elif rest.startswith('(["'): label = rest[3:-3]; node_type = 'terminal'
-        elif rest.startswith('(['): label = rest[2:-2]; node_type = 'terminal'
+        content = ""
+        if rest.startswith('["'): 
+            content = rest[2:-2]
+            node_type = 'process'
+        elif rest.startswith('['): 
+            content = rest[1:-1]
+            node_type = 'process'
+        elif rest.startswith('{"'): 
+            content = rest[2:-2]
+            node_type = 'decision'
+        elif rest.startswith('{'): 
+            content = rest[1:-1]
+            node_type = 'decision'
+        elif rest.startswith('(["'): 
+            content = rest[3:-3]
+            node_type = 'terminal'
+        elif rest.startswith('(['): 
+            content = rest[2:-2]
+            node_type = 'terminal'
+        elif rest.startswith('(("'): 
+            content = rest[3:-3]
+            node_type = 'terminal'
+        elif rest.startswith('(('): 
+            content = rest[2:-2]
+            node_type = 'terminal'
+            
+        # Strip quotes if they were not stripped by specific checks above (e.g. mixed case)
+        # Actually the above covers ["..."] and [...].
+        # But if we have [ "Label" ], the space might be an issue?
+        # Let's just strip surrounding quotes if present.
+        if content.startswith('"') and content.endswith('"'):
+            content = content[1:-1]
+        
+        label = content
+            
     return node_id, label, node_type
 
 def build_structure(G, current_node, stop_node, visited):
     blocks = []
+    # visited set in this context is for the current recursion path to detect immediate loops if needed,
+    # but we rely on graph topology for loop detection now.
+    # Actually, we still need visited to avoid infinite recursion if we don't detect the loop correctly.
+    
     while current_node and current_node != stop_node:
         if current_node in visited:
-            blocks.append({'type': 'process', 'label': f'Loop back to {G.nodes[current_node].get("label", current_node)}'})
+            # This should ideally not happen if we handle loops correctly, 
+            # but as a fallback for complex spaghetti code:
+            blocks.append({'type': 'process', 'label': f'Jump to {G.nodes[current_node].get("label", current_node)}'})
             break
         
         visited.add(current_node)
@@ -107,6 +145,47 @@ def build_structure(G, current_node, stop_node, visited):
         successors = list(G.successors(current_node))
         
         if len(successors) == 2:
+            # Check for Loop (Head-Controlled)
+            # A loop header has one branch that leads back to itself, and one that doesn't (exit).
+            # BUT: If both lead back (nested if in loop), it's not a loop header for *this* loop, but an inner structure.
+            # We assume structured programming: Loop Header dominates the body.
+            
+            s0 = successors[0]
+            s1 = successors[1]
+            
+            # Check reachability back to current_node
+            # We must be careful: s0 -> ... -> current_node
+            leads_back_0 = nx.has_path(G, s0, current_node)
+            leads_back_1 = nx.has_path(G, s1, current_node)
+            
+            if leads_back_0 and not leads_back_1:
+                # s0 is body, s1 is exit
+                loop_body_start = s0
+                exit_node = s1
+                is_loop = True
+            elif leads_back_1 and not leads_back_0:
+                # s1 is body, s0 is exit
+                loop_body_start = s1
+                exit_node = s0
+                is_loop = True
+            else:
+                is_loop = False
+                
+            if is_loop:
+                # It is a loop!
+                # Build body. Stop node is current_node (the header).
+                # We need to pass a copy of visited? Yes.
+                body_blocks = build_structure(G, loop_body_start, current_node, visited.copy())
+                
+                blocks.append({
+                    'type': 'loop',
+                    'label': label,
+                    'body': body_blocks
+                })
+                current_node = exit_node
+                continue
+
+            # Standard Decision
             merge_node = find_merge_node(G, successors[0], successors[1])
             edge1 = G.get_edge_data(current_node, successors[0])
             label1 = edge1.get('label', '').lower()
@@ -128,8 +207,35 @@ def build_structure(G, current_node, stop_node, visited):
             current_node = merge_node
             
         elif len(successors) == 1:
-            blocks.append({'type': 'process', 'label': label})
-            current_node = successors[0]
+            # Check for Loop (Infinite or Foot-Controlled)
+            # If the single successor leads back to current_node, it's a loop.
+            s0 = successors[0]
+            
+            # CRITICAL: If s0 is the stop_node, this is just the back-edge of the parent loop.
+            # Do NOT treat it as a new loop header.
+            if stop_node and s0 == stop_node:
+                blocks.append({'type': 'process', 'label': label})
+                current_node = s0
+            elif nx.has_path(G, s0, current_node):
+                # It is a loop!
+                # For void loop(), the header is "Loop Start" (diamond).
+                # For do-while, the header is the first statement (process).
+                
+                # We treat it as a loop block.
+                # Stop node is current_node.
+                body_blocks = build_structure(G, s0, current_node, visited.copy())
+                
+                blocks.append({
+                    'type': 'loop',
+                    'label': label,
+                    'body': body_blocks
+                })
+                # There is no exit node for an infinite loop in this graph structure
+                # (unless there's a break inside, which we handle as side-exit or just end of body)
+                current_node = None 
+            else:
+                blocks.append({'type': 'process', 'label': label})
+                current_node = successors[0]
         else:
             blocks.append({'type': 'process', 'label': label})
             current_node = None
@@ -158,11 +264,6 @@ def find_merge_node(G, node1, node2):
     return None
 
 def calculate_min_widths(blocks):
-    """
-    Recursively calculates the minimum width for a list of blocks.
-    Annotates each block with 'min_width'.
-    Returns the max min_width of the list.
-    """
     max_width = MIN_BLOCK_WIDTH
     
     for block in blocks:
@@ -174,32 +275,25 @@ def calculate_min_widths(blocks):
         elif block['type'] == 'decision':
             yes_width = calculate_min_widths(block['yes'])
             no_width = calculate_min_widths(block['no'])
-            
-            # Decision needs to fit its own label too
             decision_label_width = text_width
-            
-            # The width of a decision block is the sum of its branches
-            # But it also needs to be at least wide enough for its header label
             block['min_width'] = max(yes_width + no_width, decision_label_width)
-            
-            # Store branch widths for proportional rendering
             block['yes_min_width'] = yes_width
             block['no_min_width'] = no_width
             
+        elif block['type'] == 'loop':
+            body_width = calculate_min_widths(block['body'])
+            # Loop needs width for body + indent
+            # And width for label
+            block['min_width'] = max(body_width + LOOP_INDENT, text_width)
+            block['body_min_width'] = body_width
+
         max_width = max(max_width, block['min_width'])
         
     return max_width
 
 def calculate_heights(blocks, width):
-    """
-    Recursively calculates height based on available width.
-    Annotates each block with 'height'.
-    Returns total height.
-    """
     total_h = 0
     for block in blocks:
-        # Calculate text wrapping
-        # Available width for text
         text_area_width = width - PADDING_X * 2
         text_len = len(block['label']) * CHAR_WIDTH_AVG
         lines = math.ceil(text_len / max(1, text_area_width))
@@ -210,12 +304,10 @@ def calculate_heights(blocks, width):
             total_h += block['height']
             
         elif block['type'] == 'decision':
-            # For decision, we split width proportionally based on min_width requirements
             yes_min = block['yes_min_width']
             no_min = block['no_min_width']
             total_min = yes_min + no_min
             
-            # Proportional split
             yes_w = width * (yes_min / total_min)
             no_w = width - yes_w
             
@@ -223,13 +315,31 @@ def calculate_heights(blocks, width):
             no_h = calculate_heights(block['no'], no_w)
             
             content_height = max(yes_h, no_h)
-            header_height = max(40, text_height + 20) # +20 for diagonals space
+            header_height = max(40, text_height + 20)
             
             block['height'] = header_height + content_height
             block['header_height'] = header_height
             block['content_height'] = content_height
             block['yes_width'] = yes_w
             block['no_width'] = no_w
+            
+            total_h += block['height']
+            
+        elif block['type'] == 'loop':
+            # Loop layout:
+            # Header bar (text_height)
+            # Body (indented)
+            
+            header_height = max(30, text_height)
+            
+            # Body width is width - LOOP_INDENT
+            body_w = width - LOOP_INDENT
+            body_h = calculate_heights(block['body'], body_w)
+            
+            block['height'] = header_height + body_h
+            block['header_height'] = header_height
+            block['body_height'] = body_h
+            block['body_width'] = body_w
             
             total_h += block['height']
             
@@ -244,7 +354,6 @@ def render_blocks(blocks, x, y, width):
             h = block['height']
             svg += f'<rect x="{x}" y="{current_y}" width="{width}" height="{h}" fill="white" stroke="black" stroke-width="1"/>'
             
-            # Render text with wrapping
             lines = wrap_text(block['label'], width - PADDING_X * 2)
             text_y = current_y + PADDING_Y + FONT_SIZE/2
             for line in lines:
@@ -259,16 +368,9 @@ def render_blocks(blocks, x, y, width):
             yes_w = block['yes_width']
             no_w = block['no_width']
             
-            # Header
             svg += f'<rect x="{x}" y="{current_y}" width="{width}" height="{header_h}" fill="#f0f0f0" stroke="black" stroke-width="1"/>'
             svg += f'<line x1="{x}" y1="{current_y}" x2="{x+yes_w}" y2="{current_y+header_h}" stroke="black" stroke-width="1"/>'
             svg += f'<line x1="{x+width}" y1="{current_y}" x2="{x+yes_w}" y2="{current_y+header_h}" stroke="black" stroke-width="1"/>'
-            
-            # Label
-            # User requested logic:
-            # 1. Middle of block: x + width/2
-            # 2. Intersection point: x + yes_w
-            # 3. Position: Average of 1 and 2
             
             block_center_x = x + width / 2
             intersection_x = x + yes_w
@@ -276,15 +378,12 @@ def render_blocks(blocks, x, y, width):
             
             svg += f'<text x="{label_x}" y="{current_y + header_h/2}" text-anchor="middle" font-size="{FONT_SIZE}">{html.escape(block["label"])}</text>'
             
-            # True/False
             svg += f'<text x="{x + yes_w/2}" y="{current_y + header_h - 5}" text-anchor="middle" font-size="12">True</text>'
             svg += f'<text x="{x + yes_w + no_w/2}" y="{current_y + header_h - 5}" text-anchor="middle" font-size="12">False</text>'
             
-            # Branches
             svg += render_blocks(block['yes'], x, current_y + header_h, yes_w)
             svg += render_blocks(block['no'], x + yes_w, current_y + header_h, no_w)
             
-            # Fill empty space
             yes_content_h = sum(b['height'] for b in block['yes'])
             no_content_h = sum(b['height'] for b in block['no'])
             
@@ -295,12 +394,34 @@ def render_blocks(blocks, x, y, width):
                 
             current_y += header_h + content_h
 
+        elif block['type'] == 'loop':
+            h = block['height']
+            header_h = block['header_height']
+            body_h = block['body_height']
+            body_w = block['body_width']
+            
+            # Draw L-shape container
+            # Top bar
+            svg += f'<rect x="{x}" y="{current_y}" width="{width}" height="{header_h}" fill="#e0e0e0" stroke="black" stroke-width="1"/>'
+            svg += f'<text x="{x + 10}" y="{current_y + header_h/2 + 5}" font-size="{FONT_SIZE}">{html.escape(block["label"])}</text>'
+            
+            # Side bar (left)
+            svg += f'<rect x="{x}" y="{current_y + header_h}" width="{LOOP_INDENT}" height="{body_h}" fill="#e0e0e0" stroke="black" stroke-width="1"/>'
+            
+            # Body area (white background for body blocks)
+            # We don't need a rect for body area, the blocks will draw themselves.
+            # But we might want a border? The blocks have borders.
+            # The space to the right of side bar is where body goes.
+            
+            svg += render_blocks(block['body'], x + LOOP_INDENT, current_y + header_h, body_w)
+            
+            # If body is shorter than expected? (Shouldn't happen with calc)
+            
+            current_y += h
+
     return svg
 
 def wrap_text(text, max_width):
-    """
-    Simple word wrap
-    """
     words = text.split()
     lines = []
     current_line = []
@@ -310,7 +431,7 @@ def wrap_text(text, max_width):
         word_len = len(word) * CHAR_WIDTH_AVG
         if current_len + word_len <= max_width:
             current_line.append(word)
-            current_len += word_len + CHAR_WIDTH_AVG # Space
+            current_len += word_len + CHAR_WIDTH_AVG 
         else:
             if current_line:
                 lines.append(" ".join(current_line))

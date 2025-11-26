@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const resetBtn = document.getElementById('reset-btn');
 
     let currentMermaidCode = '';
+    let currentMermaidSvg = '';
 
     // Drag & Drop events
     dropZone.addEventListener('dragover', (e) => {
@@ -53,10 +54,15 @@ document.addEventListener('DOMContentLoaded', () => {
         mermaidPreview.innerHTML = '';
         svgPreview.innerHTML = '';
         currentMermaidCode = '';
+        currentMermaidSvg = '';
     });
 
     downloadMermaidBtn.addEventListener('click', () => {
-        downloadSvg(mermaidPreview, 'flowchart.svg');
+        if (currentMermaidSvg) {
+            downloadStringAsFile(currentMermaidSvg, 'flowchart.svg', 'image/svg+xml');
+        } else {
+            downloadSvg(mermaidPreview, 'flowchart.svg');
+        }
     });
 
     downloadNsdBtn.addEventListener('click', () => {
@@ -127,6 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
         nsdSection.classList.add('hidden'); // Hide NSD until requested
 
         mermaidPreview.innerHTML = '';
+        currentMermaidSvg = '';
 
         try {
             // Check if code is valid mermaid?
@@ -140,10 +147,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const { svg } = await mermaid.render(id, code);
             mermaidPreview.innerHTML = svg;
+            currentMermaidSvg = svg;
         } catch (error) {
             console.error('Mermaid rendering error:', error);
             mermaidPreview.innerHTML = `<p class="error">Error rendering Mermaid diagram: ${error.message}</p><pre>${code}</pre>`;
         }
+    }
+
+    function downloadStringAsFile(content, filename, type) {
+        const blob = new Blob([content], { type: type });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 
     function downloadSvg(container, filename) {

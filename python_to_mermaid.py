@@ -299,13 +299,14 @@ class SimplePythonToMermaid(ast.NodeVisitor):
             label = self.pending_label
             self.pending_label = None
             
+        if isinstance(from_id, list):
+            for fid in from_id:
+                self.add_edge(fid, to_id, label)
+            return
+
         arrow = "-->"
         if label:
             arrow = f"-->|{label}|"
             
-        if isinstance(from_id, list):
-            for fid in from_id:
-                self.lines.append(f"{fid} {arrow} {to_id}")
-        else:
-            self.lines.append(f"{from_id} {arrow} {to_id}")
+        self.lines.append(f"{from_id} {arrow} {to_id}")
 

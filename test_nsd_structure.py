@@ -13,11 +13,13 @@ B -->|No| D[End]
     print(svg) 
     
     # Check for loop specific elements
-    # We expect a side bar with width 30 (LOOP_INDENT)
-    if 'width="30"' in svg:
-        print("SUCCESS: Found loop side bar (width=30)")
+    # We expect a path for the L-shape
+    if '<path d="M' in svg and 'fill="#e0e0e0"' in svg:
+        print("SUCCESS: Found loop L-shape path")
     else:
-        print("FAILURE: Loop side bar not found")
+        print("FAILURE: Loop L-shape path not found")
+        
+    # Check for loop label
         
     # Check for loop label
     if 'x &lt; 10?' in svg:

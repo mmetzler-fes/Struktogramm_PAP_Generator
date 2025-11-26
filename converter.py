@@ -134,14 +134,12 @@ def build_structure(G, current_node, stop_node, visited):
     
     while current_node and current_node != stop_node:
         if current_node in visited:
-            # This should ideally not happen if we handle loops correctly, 
-            # but as a fallback for complex spaghetti code:
-            blocks.append({'type': 'process', 'label': f'Jump to {G.nodes[current_node].get("label", current_node)}'})
             break
-        
         visited.add(current_node)
+        
+        # Get node info
         node_data = G.nodes[current_node]
-        label = node_data.get('label', current_node)
+        label = node_data.get('label', '').replace('"', '')
         successors = list(G.successors(current_node))
         
         if len(successors) == 2:
@@ -155,11 +153,14 @@ def build_structure(G, current_node, stop_node, visited):
             
             # Check reachability back to current_node
             # We must be careful: s0 -> ... -> current_node
-            leads_back_0 = nx.has_path(G, s0, current_node)
-            leads_back_1 = nx.has_path(G, s1, current_node)
+            # If s0 is stop_node, it cannot lead back within the current scope.
+            leads_back_0 = False if (stop_node and s0 == stop_node) else has_path_excluding(G, s0, current_node, stop_node)
+            leads_back_1 = False if (stop_node and s1 == stop_node) else has_path_excluding(G, s1, current_node, stop_node)
             
             if leads_back_0 and not leads_back_1:
                 # s0 is body, s1 is exit
+                # Loop Header is current_node.
+                # Stop node for body is current_node.
                 loop_body_start = s0
                 exit_node = s1
                 is_loop = True
@@ -186,7 +187,7 @@ def build_structure(G, current_node, stop_node, visited):
                 continue
 
             # Standard Decision
-            merge_node = find_merge_node(G, successors[0], successors[1])
+            merge_node = find_merge_node(G, successors[0], successors[1], stop_node)
             edge1 = G.get_edge_data(current_node, successors[0])
             label1 = edge1.get('label', '').lower()
             
@@ -212,17 +213,11 @@ def build_structure(G, current_node, stop_node, visited):
             s0 = successors[0]
             
             # CRITICAL: If s0 is the stop_node, this is just the back-edge of the parent loop.
-            # Do NOT treat it as a new loop header.
             if stop_node and s0 == stop_node:
                 blocks.append({'type': 'process', 'label': label})
                 current_node = s0
-            elif nx.has_path(G, s0, current_node):
+            elif has_path_excluding(G, s0, current_node, stop_node):
                 # It is a loop!
-                # For void loop(), the header is "Loop Start" (diamond).
-                # For do-while, the header is the first statement (process).
-                
-                # We treat it as a loop block.
-                # Stop node is current_node.
                 body_blocks = build_structure(G, s0, current_node, visited.copy())
                 
                 blocks.append({
@@ -230,8 +225,6 @@ def build_structure(G, current_node, stop_node, visited):
                     'label': label,
                     'body': body_blocks
                 })
-                # There is no exit node for an infinite loop in this graph structure
-                # (unless there's a break inside, which we handle as side-exit or just end of body)
                 current_node = None 
             else:
                 blocks.append({'type': 'process', 'label': label})
@@ -242,11 +235,31 @@ def build_structure(G, current_node, stop_node, visited):
             
     return blocks
 
-def find_merge_node(G, node1, node2):
+def has_path_excluding(G, source, target, exclude_node):
+    if source == target: return True
+    if exclude_node is None:
+        return nx.has_path(G, source, target)
+        
+    # BFS to find path without visiting exclude_node
+    visited = {source, exclude_node}
+    queue = [source]
+    
+    while queue:
+        n = queue.pop(0)
+        if n == target: return True
+        
+        for succ in G.successors(n):
+            if succ not in visited:
+                visited.add(succ)
+                queue.append(succ)
+    return False
+
+def find_merge_node(G, node1, node2, stop_node=None):
     visited1 = set()
     queue1 = [node1]
     while queue1:
         n = queue1.pop(0)
+        if n == stop_node: continue 
         if n not in visited1:
             visited1.add(n)
             queue1.extend(G.successors(n))
@@ -256,7 +269,9 @@ def find_merge_node(G, node1, node2):
     visited2 = set()
     while queue2:
         n = queue2.pop(0)
-        if n in visited1: return n
+        if n == stop_node: continue
+        if n in visited1: 
+            return n
         if n not in visited2:
             visited2.add(n)
             queue2.extend(G.successors(n))
@@ -400,22 +415,32 @@ def render_blocks(blocks, x, y, width):
             body_h = block['body_height']
             body_w = block['body_width']
             
-            # Draw L-shape container
-            # Top bar
-            svg += f'<rect x="{x}" y="{current_y}" width="{width}" height="{header_h}" fill="#e0e0e0" stroke="black" stroke-width="1"/>'
+            # Draw L-shape container using a path to avoid line between header and side bar
+            # Points:
+            # 1. Top-Left (x, y)
+            # 2. Top-Right (x + width, y)
+            # 3. Header-Bottom-Right (x + width, y + header_h)
+            # 4. Inner-Corner (x + LOOP_INDENT, y + header_h)
+            # 5. Bottom-Right of Side Bar (x + LOOP_INDENT, y + h)
+            # 6. Bottom-Left (x, y + h)
+            # Close path
+            
+            p1 = f"{x},{current_y}"
+            p2 = f"{x+width},{current_y}"
+            p3 = f"{x+width},{current_y+header_h}"
+            p4 = f"{x+LOOP_INDENT},{current_y+header_h}"
+            p5 = f"{x+LOOP_INDENT},{current_y+h}"
+            p6 = f"{x},{current_y+h}"
+            
+            path_d = f"M {p1} L {p2} L {p3} L {p4} L {p5} L {p6} Z"
+            
+            svg += f'<path d="{path_d}" fill="#e0e0e0" stroke="black" stroke-width="1"/>'
             svg += f'<text x="{x + 10}" y="{current_y + header_h/2 + 5}" font-size="{FONT_SIZE}">{html.escape(block["label"])}</text>'
             
-            # Side bar (left)
-            svg += f'<rect x="{x}" y="{current_y + header_h}" width="{LOOP_INDENT}" height="{body_h}" fill="#e0e0e0" stroke="black" stroke-width="1"/>'
-            
             # Body area (white background for body blocks)
-            # We don't need a rect for body area, the blocks will draw themselves.
-            # But we might want a border? The blocks have borders.
-            # The space to the right of side bar is where body goes.
+            # The blocks will draw themselves.
             
             svg += render_blocks(block['body'], x + LOOP_INDENT, current_y + header_h, body_w)
-            
-            # If body is shorter than expected? (Shouldn't happen with calc)
             
             current_y += h
 

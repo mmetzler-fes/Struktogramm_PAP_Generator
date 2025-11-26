@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -19,17 +21,33 @@
         <main>
             <div class="upload-area" id="drop-zone">
                 <div class="icon">📂</div>
-                <p>Drag & Drop your <code>.mmd</code> file here</p>
+                <p>Drag & Drop your <code>.py</code> or <code>.mmd</code> file here</p>
                 <p>or</p>
                 <button id="browse-btn">Browse Files</button>
-                <input type="file" id="file-input" accept=".mmd,.txt" hidden>
+                <input type="file" id="file-input" accept=".mmd,.txt,.py" hidden>
             </div>
 
             <div id="preview-container" class="hidden">
                 <h2>Result</h2>
-                <div id="svg-preview"></div>
-                <div class="actions">
-                    <button id="download-btn">Download SVG</button>
+
+                <div id="mermaid-section" class="hidden">
+                    <h3>Flowchart</h3>
+                    <div class="mermaid" id="mermaid-preview"></div>
+                    <div class="actions">
+                        <button id="download-mermaid-btn">Download Mermaid SVG</button>
+                        <button id="convert-nsd-btn" class="primary">Convert to NSD</button>
+                    </div>
+                </div>
+
+                <div id="nsd-section" class="hidden">
+                    <h3>Nassi-Shneiderman Diagram</h3>
+                    <div id="svg-preview"></div>
+                    <div class="actions">
+                        <button id="download-nsd-btn">Download NSD SVG</button>
+                    </div>
+                </div>
+
+                <div class="actions" style="margin-top: 20px;">
                     <button id="reset-btn" class="secondary">Convert Another</button>
                 </div>
             </div>
@@ -39,6 +57,11 @@
             <p>Powered by Antigravity</p>
         </footer>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: false });
+    </script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
+
 </html>

@@ -71,10 +71,12 @@ class ArduinoToMermaidConverter:
             self.add_edge(self.last_id, loop_entry)
             self.last_id = loop_entry
             
-            self.parse_block(loop_body)
+            # Pass loop_entry as the current_id for the block, and indicate it's a loop body
+            self.parse_block(loop_body, current_id=loop_entry, is_loop_body=True)
             
-            # Connect back to loop start
-            self.add_edge(self.last_id, loop_entry)
+            # Connect back to loop start if the loop body wasn't terminal
+            if self.last_id: # If last_id is None, it means the loop body was terminal
+                self.add_edge(self.last_id, loop_entry)
             
             # Technically Arduino loop never ends, but for visualization we might show it
             # But here we just loop back.
@@ -92,141 +94,231 @@ class ArduinoToMermaidConverter:
                     return i
         return len(text)
 
-    def parse_block(self, content):
+    def extract_block(self, text):
+        """Helper to extract content within the first { } block."""
+        brace_count = 0
+        start = -1
+        for i, char in enumerate(text):
+            if char == '{':
+                if start == -1:
+                    start = i + 1
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0 and start != -1:
+                    return text[start:i]
+        return "" # Should not happen for valid code
+
+    def parse_block(self, content, current_id=None, is_loop_body=False):
         # Simple recursive descent parser for block content
         # We look for: if, while, for, and statements ending in ;
         
+        if current_id is None:
+            current_id = self.last_id
+
         i = 0
         while i < len(content):
             # Skip whitespace
             while i < len(content) and content[i].isspace():
                 i += 1
             if i >= len(content): break
+    def parse_block(self, block_content, current_id=None, is_loop_body=False):
+        # Split into statements (basic implementation)
+        
+        # Initialize current_ids
+        if current_id is None:
+            current_ids = [self.last_id] if self.last_id else []
+        elif isinstance(current_id, list):
+            current_ids = current_id
+        else:
+            current_ids = [current_id]
             
+        # Remove None values
+        current_ids = [pid for pid in current_ids if pid is not None]
+        
+        remaining = block_content.strip()
+        
+        while remaining:
             # Check for control structures
-            rest = content[i:]
-            
-            if rest.startswith('if'):
-                i = self.parse_if(content, i)
-            elif rest.startswith('while'):
-                i = self.parse_while(content, i)
-            elif rest.startswith('for'):
-                i = self.parse_for(content, i)
-            else:
-                # Statement
-                # Find next ; or } or { (if block starts without keyword? unlikely in valid C code we care about)
-                # Actually, we just look for ;
-                semi = content.find(';', i)
-                if semi != -1:
-                    stmt = content[i:semi].strip()
-                    if stmt:
-                        nid = self.add_node(stmt)
-                        self.add_edge(self.last_id, nid)
-                        self.last_id = nid
-                    i = semi + 1
-                else:
-                    # End of block or error
-                    break
+            if remaining.startswith('if'):
+                # Handle If
+                match = re.search(r'if\s*\(.*\)\s*\{', remaining)
+                if match:
+                    if_body_start_idx = match.end() - 1
+                    if_body_end_idx = self.find_matching_brace(remaining, if_body_start_idx)
+                    
+                    full_if_part_len = if_body_end_idx + 1
+                    
+                    # Check for else
+                    temp_remaining = remaining[full_if_part_len:].strip()
+                    full_statement_len = full_if_part_len
+                    
+                    if temp_remaining.startswith('else'):
+                         # Extract else part
+                         else_match = re.search(r'else\s*(\s*if\s*\(.*?\)\s*)?\{', temp_remaining)
+                         if else_match:
+                             else_brace_rel_idx = else_match.end() - 1
+                             else_brace_abs_idx = full_statement_len + (len(remaining[full_statement_len:]) - len(temp_remaining)) + else_brace_rel_idx
+                             
+                             else_body_end_idx = self.find_matching_brace(remaining, else_brace_abs_idx)
+                             full_statement_len = else_body_end_idx + 1
+                    
+                    exits = self.parse_if(remaining[:full_statement_len], current_ids)
+                    
+                    current_ids = exits if isinstance(exits, list) else ([exits] if exits else [])
+                    remaining = remaining[full_statement_len:].strip()
+                    continue
 
-    def parse_if(self, content, start_index):
+            elif remaining.startswith('while'):
+                 # Handle While
+                 match = re.search(r'while\s*\(.*\)\s*\{', remaining)
+                 if match:
+                     body_start_idx = match.end() - 1
+                     body_end_idx = self.find_matching_brace(remaining, body_start_idx)
+                     full_statement_len = body_end_idx + 1
+                     
+                     loop_exit = self.parse_while(remaining[:full_statement_len], current_ids)
+                     
+                     current_ids = [loop_exit] if loop_exit else []
+                     remaining = remaining[full_statement_len:].strip()
+                     continue
+
+            elif remaining.startswith('for'):
+                 # Handle For
+                 match = re.search(r'for\s*\(.*\)\s*\{', remaining)
+                 if match:
+                     body_start_idx = match.end() - 1
+                     body_end_idx = self.find_matching_brace(remaining, body_start_idx)
+                     full_statement_len = body_end_idx + 1
+                     
+                     loop_exit = self.parse_for(remaining[:full_statement_len], current_ids)
+                     
+                     current_ids = [loop_exit] if loop_exit else []
+                     remaining = remaining[full_statement_len:].strip()
+                     continue
+            
+            # Basic statement (ends with ;)
+            semicolon = remaining.find(';')
+            brace = remaining.find('{')
+            
+            if semicolon != -1 and (brace == -1 or semicolon < brace):
+                statement = remaining[:semicolon].strip()
+                remaining = remaining[semicolon+1:].strip()
+                
+                if not statement: continue
+                
+                # Create node
+                node_id = self.add_node(statement)
+                
+                # Connect all parents to this node
+                self.add_edge(current_ids, node_id)
+                
+                current_ids = [node_id]
+            else:
+                # Unknown or complex structure
+                break
+                
+        # Return the last node ID(s) of this block
+        # If current_ids is empty, it means the block is terminal (e.g. infinite loop)
+        if not current_ids: 
+            self.last_id = None
+            return None
+            
+        final_id = current_ids[0] if len(current_ids) == 1 else current_ids
+        self.last_id = final_id
+        return final_id
+
+    def parse_if(self, content, current_id):
         # Match if (condition) {
-        # We need to find the condition and the body
         
-        # Find (
-        open_paren = content.find('(', start_index)
-        if open_paren == -1: return len(content)
+        open_paren = content.find('(')
+        if open_paren == -1: return current_id
         
-        # Find matching )
         close_paren = self.find_matching_paren(content, open_paren)
         condition = content[open_paren+1:close_paren].strip()
         
-        # Find {
         brace_start = content.find('{', close_paren)
-        if brace_start == -1: return len(content) # Single line if not supported for simplicity
+        if brace_start == -1: return current_id
         
         brace_end = self.find_matching_brace(content, brace_start)
         true_body = content[brace_start+1:brace_end]
         
         # Create decision node
         decision_id = self.add_node(f"{condition}?", "diamond")
-        self.add_edge(self.last_id, decision_id)
-        
-        entry_id = decision_id
+        self.add_edge(current_id, decision_id)
         
         # True Branch
-        self.last_id = entry_id
-        # Add edge with label Yes manually for first node?
-        # We can use a temporary "pending label" mechanism like in python converter
-        # Or just add a dummy node if needed.
-        # Let's use pending label approach.
         self.pending_label = "Yes"
-        
-        self.parse_block(true_body)
-        end_true = self.last_id
-        
-        # Check for else
-        next_idx = brace_end + 1
-        while next_idx < len(content) and content[next_idx].isspace():
-            next_idx += 1
-            
-        end_false = entry_id # Default if no else
-        
-        if content[next_idx:].startswith('else'):
-            # Handle else
-            else_start = next_idx + 4
-            # Check for {
-            else_brace_start = content.find('{', else_start)
-            if else_brace_start != -1:
-                else_brace_end = self.find_matching_brace(content, else_brace_start)
-                false_body = content[else_brace_start+1:else_brace_end]
-                
-                self.last_id = entry_id
-                self.pending_label = "No"
-                self.parse_block(false_body)
-                end_false = self.last_id
-                
-                next_idx = else_brace_end + 1
-            else:
-                # else if? or single line else?
-                # For now assume block
-                pass
-        else:
-            # No else, draw No edge to merge point?
-            # Or just leave end_false as entry_id
-            pass
-            
-        # Merge
-        self.last_id = [end_true, end_false]
+        end_true = self.parse_block(true_body, decision_id)
         self.pending_label = None
         
-        return next_idx
+        # Check for else
+        remaining = content[brace_end+1:].strip()
+        end_false = None
+        
+        if remaining.startswith('else'):
+            else_brace_start = remaining.find('{')
+            if else_brace_start != -1:
+                else_brace_end = self.find_matching_brace(remaining, else_brace_start)
+                false_body = remaining[else_brace_start+1:else_brace_end]
+                
+                self.pending_label = "No"
+                end_false = self.parse_block(false_body, decision_id)
+                self.pending_label = None
+            else:
+                pass
+        
+        # Collect exits
+        exits = []
+        if end_true:
+            if isinstance(end_true, list): exits.extend(end_true)
+            else: exits.append(end_true)
+            
+        if end_false:
+            if isinstance(end_false, list): exits.extend(end_false)
+            else: exits.append(end_false)
+        elif not remaining.startswith('else'):
+             # If no else, decision_id is an exit (No branch)
+             # We label it "No"
+             exits.append((decision_id, "No"))
+             
+        return exits
 
-    def parse_while(self, content, start_index):
-        open_paren = content.find('(', start_index)
+    def parse_while(self, content, current_id):
+        open_paren = content.find('(')
         close_paren = self.find_matching_paren(content, open_paren)
         condition = content[open_paren+1:close_paren].strip()
+        
+        # Check for infinite loop
+        is_infinite = condition == 'true' or condition == '1'
         
         brace_start = content.find('{', close_paren)
         brace_end = self.find_matching_brace(content, brace_start)
         body = content[brace_start+1:brace_end]
         
-        decision_id = self.add_node(f"{condition}?", "diamond")
-        self.add_edge(self.last_id, decision_id)
+        loop_id = self.add_node(f"while({condition})", "diamond" if not is_infinite else "diamond")
+        # If infinite, maybe use a different shape or label?
+        # User wants "while(true)" in a diamond.
         
-        self.last_id = decision_id
-        self.pending_label = "True"
+        self.add_edge(current_id, loop_id)
         
-        self.parse_block(body)
+        self.pending_label = "True" if not is_infinite else None # Infinite loop body is just the path
+        # Actually, for while(true), we usually don't label the entry to body as "True" if it's the only path.
+        # But consistency is good.
         
-        self.add_edge(self.last_id, decision_id)
+        end_body = self.parse_block(body, loop_id, is_loop_body=True)
+        self.pending_label = None
         
-        self.last_id = decision_id
-        self.pending_label = "False"
+        # Connect back
+        self.add_edge(end_body, loop_id)
         
-        return brace_end + 1
+        if is_infinite:
+            return None # No exit
+        else:
+            return loop_id # Exit is the loop header (False branch)
 
-    def parse_for(self, content, start_index):
-        open_paren = content.find('(', start_index)
+    def parse_for(self, content, current_id):
+        open_paren = content.find('(')
         close_paren = self.find_matching_paren(content, open_paren)
         header = content[open_paren+1:close_paren].strip()
         
@@ -234,20 +326,16 @@ class ArduinoToMermaidConverter:
         brace_end = self.find_matching_brace(content, brace_start)
         body = content[brace_start+1:brace_end]
         
-        decision_id = self.add_node(f"For {header}", "diamond")
-        self.add_edge(self.last_id, decision_id)
+        loop_id = self.add_node(f"For {header}", "diamond")
+        self.add_edge(current_id, loop_id)
         
-        self.last_id = decision_id
         self.pending_label = "Next"
+        end_body = self.parse_block(body, loop_id, is_loop_body=True)
+        self.pending_label = None
         
-        self.parse_block(body)
+        self.add_edge(end_body, loop_id)
         
-        self.add_edge(self.last_id, decision_id)
-        
-        self.last_id = decision_id
-        self.pending_label = "Done"
-        
-        return brace_end + 1
+        return loop_id # Exit is loop header (Done)
 
     def find_matching_paren(self, text, start_index):
         count = 0
@@ -269,8 +357,12 @@ class ArduinoToMermaidConverter:
             self.pending_label = None
             
         if isinstance(from_id, list):
-            for fid in from_id:
-                self.add_edge(fid, to_id, label)
+            for item in from_id:
+                if isinstance(item, tuple):
+                    fid, lbl = item
+                    self.add_edge(fid, to_id, lbl or label)
+                else:
+                    self.add_edge(item, to_id, label)
             return
 
         arrow = "-->"

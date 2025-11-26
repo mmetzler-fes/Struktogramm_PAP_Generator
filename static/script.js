@@ -65,6 +65,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    const downloadMmdBtn = document.getElementById('download-mmd-btn');
+    downloadMmdBtn.addEventListener('click', () => {
+        if (currentMermaidCode) {
+            downloadStringAsFile(currentMermaidCode, 'flowchart.mmd', 'text/plain');
+        }
+    });
+
     downloadNsdBtn.addEventListener('click', () => {
         downloadSvg(svgPreview, 'structogram.svg');
     });

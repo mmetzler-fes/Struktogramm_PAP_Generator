@@ -1,8 +1,9 @@
 # ProgrammAblaufplanGenerator
 
 ## Beschreibung
-
-Kurze Projektbeschreibung.
+Ein Python Programm oder ein Arduino Programm wird zunächst in ein Flussdiagramm (Programmablaufplan) im Mermaid-Format konvertiert.
+Dieses kann als SVG- oder als Textdatei abgespeichert werden oder noch in ein Struktogramm umgewandelt werden.
+Dieses kann ebenso als SVG-Datei abgespeichert werden.
 
 ## Setup
 
